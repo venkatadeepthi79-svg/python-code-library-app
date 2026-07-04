@@ -1,0 +1,69 @@
+pipeline {
+    agent {
+        node {
+            label 'prod'
+        }
+    }
+
+    stages {
+
+        stage('Code') {
+            steps {
+                git 'https://github.com/venkatadeepthi79-svg/python-code-library-app.git'
+            }
+        }
+
+        stage('CAQ') {
+            environment {
+                scannerHome = tool 'sonar'
+            }
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh """
+                        ${scannerHome}/bin/sonar-scanner \
+                        -Dsonar.projectKey=python-app \
+                        -Dsonar.sources=.
+                    """
+                }
+            }
+        }
+        stage('image') {
+            steps {
+                sh'''
+                 docker build -t venkatadeepthi/pyapp:db_image database
+                 docker build -t venkatadeepthi/pyapp:auth_image auth
+                 docker build -t venkatadeepthi/pyapp:book_image book
+                 docker build -t venkatadeepthi/pyapp:borrow_image borrow
+                 docker build -t venkatadeepthi/pyapp:app_image . 
+                 '''
+            }
+        }
+        stage('ScanImage') {
+            steps {
+                sh 'trivy image venkatadeepthi/pyapp:db_image'
+                sh 'trivy image venkatadeepthi/pyapp:auth_image'
+                sh 'trivy image venkatadeepthi/pyapp:book_image'
+                sh 'trivy image venkatadeepthi/pyapp:borrow_image'
+                sh 'trivy image venkatadeepthi/pyapp:app_image'
+            }
+        }
+        stage('Registry') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        sh 'docker push venkatadeepthi/pyapp:borrow_image'
+                        sh 'docker push venkatadeepthi/pyapp:book_image'
+                        sh 'docker push venkatadeepthi/pyapp:auth_image'
+                        sh 'docker push venkatadeepthi/pyapp:db_image'
+                        sh 'docker push venkatadeepthi/pyapp:app_image'
+                }
+            }
+        }
+    }
+        stage('Deploy') {
+            steps {
+                sh 'docker stack deploy -c compose.yml library'
+            }
+        }
+    }
+}
